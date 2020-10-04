@@ -1,0 +1,14 @@
+/build
+/dist
+/plugin.so
+/plugin.dylib
+/plugin.dll
+.DS_Store
+
+*~
+
+
+
+12tone.pdf
+
+where-jq-is.txt
