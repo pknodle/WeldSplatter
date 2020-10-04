@@ -2,6 +2,7 @@
 
 #include <app/LedDisplay.hpp>
 #include <sstream>
+#include <cmath>
 
 struct WeldSplatter_AcornTable : Module {
   enum ParamIds {
@@ -11,6 +12,7 @@ struct WeldSplatter_AcornTable : Module {
 		 TEACH_NOTE_PARAM,
                  ALLOW_REPITITION_PARAM,
                  USE_EXT_PARAM,
+                 SINGLE_OCTAVE_PARAM,
                  NUM_PARAMS
   };
   enum InputIds
@@ -48,15 +50,29 @@ struct WeldSplatter_AcornTable : Module {
 
   Label* teach_mode_indicators;
 
-  float note_voltages[12]{ 1.00, 1.08, 1.17, 1.25, 1.33, 1.42, 1.5, 1.58, 1.67, 1.75, 1.83, 1.92};
-  
+
+  float first_voltage  = 0.0f;
+
   int volt_to_note(float v){
-    for(int i = 0; i < 12; i++){
-      if(v < (note_voltages[i] + 0.01)){
-	return i;
-      }
+    float diff = v - first_voltage;
+    float step = (1.f/12.f);
+    int note = (int) round(diff/step);
+    DEBUG("volt_to_note: v: %f d: %f n: %d", v, diff, note);
+    if(diff < 0){
+      return -1;
     }
-    return -1;
+
+    return note;
+  }
+
+  float note_number_to_volts(int note_number){
+    if(note_number < 0){
+      // This is for the "null" note number.  This shouldn't really
+      // ever happen but I want to have some catch all
+      return 0.0; 
+    }else{
+      return note_number * (1.f/12.f) + first_voltage;
+    }
   }
   
   WeldSplatter_AcornTable() {
@@ -72,6 +88,7 @@ struct WeldSplatter_AcornTable : Module {
     configParam(TEACH_MODE_PARAM, 0.0, 1.0, 0.0, "Teach Mode");
     configParam(ALLOW_REPITITION_PARAM, 0.0, 1.0, 0.0, "Allow Rep");
     configParam(USE_EXT_PARAM, 0.0, 1.0, 0.0, "Ext Mode");
+    configParam(SINGLE_OCTAVE_PARAM, 0.0, 1.0, 0.0, "Single Octave");
 
     
     for(int i = 0; i < 12; i++){
@@ -80,14 +97,13 @@ struct WeldSplatter_AcornTable : Module {
 
 
     teach_mode_indicators = nullptr;
-
-    
     generate_matrix();
   }
 
 
   void generate_matrix(){
     // First, copy the taught row to the first row of the matrix
+    bool single_octave = params[SINGLE_OCTAVE_PARAM].getValue() > 0.5f;
     int i, j;
     for(i = 0; i < 12; i++){
       note_matrix[0][i] = taught_12_tone_row[i];
@@ -101,7 +117,11 @@ struct WeldSplatter_AcornTable : Module {
     // Now generate the remaining rows
     for(i = 1; i < 12; i++){
       for(j = 1; j < 12; j++){
-        note_matrix[i][j] = (note_matrix[i][0] + note_matrix[0][j]) % 12;
+        if(single_octave){
+          note_matrix[i][j] = (note_matrix[i][0] + note_matrix[0][j]) % 12;
+        }else{
+          note_matrix[i][j] = (note_matrix[i][0] + note_matrix[0][j]);
+        }
       }
     }
   }
@@ -125,9 +145,11 @@ struct WeldSplatter_AcornTable : Module {
 
   bool teach_gate_mask = 1;
 
+  bool teach_first_note = false;
+  
   bool is_note_in_row(int note){
     for(int i = 0; i < 12; i++){
-      if(taught_12_tone_row[i] == note){
+      if((taught_12_tone_row[i] % 12) == (note % 12)){
         return true;
       }
     }
@@ -145,64 +167,86 @@ struct WeldSplatter_AcornTable : Module {
       }
       lights[0].setBrightness(1.0);
       teach_mode_indicators->text = std::string{"- - - - - - - - - - - -"};
+
+      teach_first_note = true;
     }
 
     
     float note_input__volts = inputs[TEACH_NOTE_INPUT].getVoltage();
-    int note_input__number = volt_to_note(note_input__volts);
+    int note_input__number = -1;
     
     // We only want to use the range of the top of the keyboard (computer keyboard)
     // I'll probably change this later.
     bool trigger = teach_trigger.process(inputs[TEACH_TRIGGER_INPUT].getVoltage());
     bool allow_repitition = params[ALLOW_REPITITION_PARAM].getValue() > 0.5;
 
-    bool note_in_row = is_note_in_row(note_input__number);
 
 
-    // If you don't allow repititoin in your row (ie, strict mode)
-    // then don't play a note that is entered by the user. 
-    if(trigger && note_input__number && !allow_repitition){
-      teach_gate_mask = false;
-    }
-    
-    if(trigger && (note_input__number >= 0) && (allow_repitition || !note_in_row)){
-      taught_notes = true;
-      DEBUG("Trigger");
-      taught_12_tone_row[teach_index] = note_input__number;
-
-      teach_gate_mask = true;
+    if(trigger){
       
-      // Move the light to the next note in the row
-      lights[teach_index].setBrightness(0.0);
-      if(teach_index < 11){
-        lights[teach_index+1].setBrightness(1.0);
+      if(teach_first_note){
+        // The first note in the row is always '0'.
+        // So whatever note the user initially plays, call that note 0.
+        // Also save that voltage as first_voltage because volt_to_note needs to know that.
+        teach_first_note = false;
+        first_voltage = inputs[TEACH_NOTE_INPUT].getVoltage();
+        note_input__number = 0;
+        DEBUG("First Note");
       }else{
-        // We've taught all the notes
-        for(int i = 0; i < 12; i++){
-          lights[i].setBrightness(1.0);
-          params[TEACH_MODE_PARAM].setValue(0.0);
-        }
+        note_input__number = volt_to_note(note_input__volts);
+        DEBUG("Note: %d", note_input__number);
+
       }
 
-      // Now update the note indicators
-      std::stringstream ss;
-      for(int i = 0; i < 12; i++){
-        if(taught_12_tone_row[i] != -1){
-          ss << " " << taught_12_tone_row[i];
+      bool note_in_row = is_note_in_row(note_input__number);
+
+    
+      // If you don't allow repititoin in your row (ie, strict mode)
+      // then don't play a note that is entered by the user. 
+      if(!allow_repitition){
+        teach_gate_mask = false;
+      }
+
+    
+      if( (note_input__number >= 0) && (allow_repitition || !note_in_row)){
+        DEBUG("Trigger");
+        taught_12_tone_row[teach_index] = note_input__number;
+
+        teach_gate_mask = true;
+      
+        // Move the light to the next note in the row
+        lights[teach_index].setBrightness(0.0);
+        if(teach_index < 11){
+          lights[teach_index+1].setBrightness(1.0);
         }else{
-          ss << " -";
+          // We've taught all the notes
+          for(int i = 0; i < 12; i++){
+            lights[i].setBrightness(1.0);
+            params[TEACH_MODE_PARAM].setValue(0.0);
+          }
         }
+
+        // Now update the note indicators
+        std::stringstream ss;
+        for(int i = 0; i < 12; i++){
+          if(taught_12_tone_row[i] != -1){
+            ss << " " << taught_12_tone_row[i];
+          }else{
+            ss << " -";
+          }
+        }
+        std::string display = ss.str();
+
+        if(teach_mode_indicators != nullptr){
+          DEBUG("Indicate: %s %p", display.c_str(), teach_mode_indicators);
+          teach_mode_indicators->text = display;
+
+        }
+
+        teach_index = (teach_index + 1) % 12;
       }
-      std::string display = ss.str();
+    } // closes if(trigger)
 
-      if(teach_mode_indicators != nullptr){
-        DEBUG("Indicate: %s %p", display.c_str(), teach_mode_indicators);
-        teach_mode_indicators->text = display;
-
-      }
-
-      teach_index = (teach_index + 1) % 12;
-    }
     // We want to act like a normal keyboard when in teaching mode.
     // This will let the user hear the 12-tone row as they teach it.
     // (Give users feedback and all that...)
@@ -243,7 +287,7 @@ struct WeldSplatter_AcornTable : Module {
         // The user just hit a new button (ie new note)
         // (Rising edge)
         int output_note__number = note_matrix[i_cap][j_cap];
-        float output_note__vPo = note_voltages[output_note__number];
+        float output_note__vPo = note_number_to_volts(output_note__number);
         outputs[NOTE_OUTPUT].setVoltage(output_note__vPo);
         outputs[GATE_OUTPUT].setVoltage(10.0f);
         trig_gen.trigger(1e-3f);
@@ -282,7 +326,7 @@ struct WeldSplatter_AcornTable : Module {
       // We moved to a new note
       trig_gen.trigger(1e-3f);
       int output_note__number = note_matrix[row][col];
-      float output_note__volts = note_voltages[output_note__number];
+      float output_note__volts = note_number_to_volts(output_note__number);
       outputs[NOTE_OUTPUT].setVoltage(output_note__volts);
       
       int index = last_ext_row * 12 + last_ext_col;
@@ -430,7 +474,8 @@ struct WeldSplatter_AcornTableWidget : ModuleWidget {
 
       addParam(createParam<ToggleButton>(mm2px(Vec(30.0, 15.0)), module, WeldSplatter_AcornTable::TEACH_MODE_PARAM));
       addParam(createParam<ToggleButton>(mm2px(Vec(40.0, 15.0)), module, WeldSplatter_AcornTable::ALLOW_REPITITION_PARAM));
-      addParam(createParam<ToggleButton>(mm2px(Vec(50.0, 15.0)), module, WeldSplatter_AcornTable::USE_EXT_PARAM)); 
+      addParam(createParam<ToggleButton>(mm2px(Vec(60.0, 15.0)), module, WeldSplatter_AcornTable::USE_EXT_PARAM));
+      addParam(createParam<ToggleButton>(mm2px(Vec(50.0, 15.0)), module, WeldSplatter_AcornTable::SINGLE_OCTAVE_PARAM)); 
       
       
       Vec firstButton(75.0, 5.0);
@@ -450,9 +495,7 @@ struct WeldSplatter_AcornTableWidget : ModuleWidget {
       
     } // Closes constructor
 
-  void draw(const DrawArgs& args) override {
-    ModuleWidget::draw(args);
-  }
+
 };
 
 
