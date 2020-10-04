@@ -191,6 +191,7 @@ struct WeldSplatter_AcornTable : Module {
         teach_first_note = false;
         first_voltage = inputs[TEACH_NOTE_INPUT].getVoltage();
         note_input__number = 0;
+        trig_gen.trigger(1e-3f);
         DEBUG("First Note");
       }else{
         note_input__number = volt_to_note(note_input__volts);
@@ -213,7 +214,7 @@ struct WeldSplatter_AcornTable : Module {
         taught_12_tone_row[teach_index] = note_input__number;
 
         teach_gate_mask = true;
-      
+        trig_gen.trigger(1e-3f);
         // Move the light to the next note in the row
         lights[teach_index].setBrightness(0.0);
         if(teach_index < 11){
@@ -297,11 +298,6 @@ struct WeldSplatter_AcornTable : Module {
     last_i_cap = i_cap;
     last_j_cap = j_cap;
 
-    if(trig_gen.process(1 / args.sampleRate)){
-      outputs[TRIG_OUTPUT].setVoltage(10.0f);
-    }else{
-      outputs[TRIG_OUTPUT].setVoltage(0.0f);
-    }
 
   }
 
@@ -391,7 +387,16 @@ struct WeldSplatter_AcornTable : Module {
         process_ext_mode(args);
       }
     }
-   
+
+    // This allows you to pulse the output trigger
+    // in different modes.
+    if(trig_gen.process(1 / args.sampleRate)){
+      outputs[TRIG_OUTPUT].setVoltage(10.0f);
+    }else{
+      outputs[TRIG_OUTPUT].setVoltage(0.0f);
+    }
+
+    
   }
 
 
