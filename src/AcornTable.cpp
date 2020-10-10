@@ -28,6 +28,12 @@ struct WeldSplatter_AcornTable : Module {
      NOTE_OUTPUT,
      TRIG_OUTPUT,
      GATE_OUTPUT,
+     COL0_OUTPUT,
+     COL11_OUTPUT = COL0_OUTPUT + 11,
+     COL_ANY_OUTPUT,
+     ROW0_OUTPUT,
+     ROW11_OUTPUT = ROW0_OUTPUT + 11,
+     ROW_ANY_OUTPUT,
      NUM_OUTPUTS
     };
   
@@ -138,11 +144,13 @@ struct WeldSplatter_AcornTable : Module {
   int last_ext_row = -1;
   int last_ext_col = -1;
   
-  int debug_count = 0;
   
   dsp::PulseGenerator trig_gen;
   dsp::SchmittTrigger teach_trigger;
 
+  dsp::PulseGenerator row_trig_gen[13];
+  dsp::PulseGenerator col_trig_gen[13];
+  
   bool teach_gate_mask = 1;
 
   bool teach_first_note = false;
@@ -165,7 +173,6 @@ struct WeldSplatter_AcornTable : Module {
         taught_12_tone_row[i] = -1;
         lights[i].setBrightness(0.0);
       }
-      lights[0].setBrightness(1.0);
       teach_mode_indicators->text = std::string{"- - - - - - - - - - - -"};
 
       teach_first_note = true;
@@ -192,11 +199,8 @@ struct WeldSplatter_AcornTable : Module {
         first_voltage = inputs[TEACH_NOTE_INPUT].getVoltage();
         note_input__number = 0;
         trig_gen.trigger(1e-3f);
-        DEBUG("First Note");
       }else{
         note_input__number = volt_to_note(note_input__volts);
-        DEBUG("Note: %d", note_input__number);
-
       }
 
       bool note_in_row = is_note_in_row(note_input__number);
@@ -210,21 +214,22 @@ struct WeldSplatter_AcornTable : Module {
 
     
       if( (note_input__number >= 0) && (allow_repitition || !note_in_row)){
-        DEBUG("Trigger");
         taught_12_tone_row[teach_index] = note_input__number;
 
         teach_gate_mask = true;
         trig_gen.trigger(1e-3f);
         // Move the light to the next note in the row
-        lights[teach_index].setBrightness(0.0);
-        if(teach_index < 11){
-          lights[teach_index+1].setBrightness(1.0);
-        }else{
-          // We've taught all the notes
-          for(int i = 0; i < 12; i++){
-            lights[i].setBrightness(1.0);
-            params[TEACH_MODE_PARAM].setValue(0.0);
+ 
+        for(int i = 0; i < 12; i++){
+          if(taught_12_tone_row[i] != -1){
+            lights[taught_12_tone_row[i] % 12].setBrightness(1.0);
           }
+        }
+        
+
+        if(teach_index >= 11){
+          // We've taught all the notes
+          params[TEACH_MODE_PARAM].setValue(0.0);
         }
 
         // Now update the note indicators
@@ -239,7 +244,6 @@ struct WeldSplatter_AcornTable : Module {
         std::string display = ss.str();
 
         if(teach_mode_indicators != nullptr){
-          DEBUG("Indicate: %s %p", display.c_str(), teach_mode_indicators);
           teach_mode_indicators->text = display;
 
         }
@@ -311,12 +315,32 @@ struct WeldSplatter_AcornTable : Module {
     int col = (int) ( col__volts * step_size);
 
     bool row_in_range = (row >= 0) && (row < 12);
-    bool col_in_range = (col >= 0) && (row < 12);
+    bool col_in_range = (col >= 0) && (col < 12);
 
     if(!row_in_range || !col_in_range){
+      DEBUG("Out of Range: (%d %d)", row, col);
       return;
     }
     
+
+    if(row != last_ext_row){
+      // We moved to a new row
+      DEBUG("Trig gen row: %d", row);
+      if(row < 12){
+        row_trig_gen[row].trigger(1e-3f);
+      }
+      row_trig_gen[12].trigger(1e-3f);
+    }
+
+
+    if (col != last_ext_col){
+      // We moved to a new col
+      DEBUG("Trig gen col: %d", col);
+      if(col < 12){
+        col_trig_gen[col].trigger(1e-3f);
+      }
+      col_trig_gen[12].trigger(1e-3f);
+    }
     
     if((row != last_ext_row) || (col != last_ext_col)){
       // We moved to a new note
@@ -335,19 +359,18 @@ struct WeldSplatter_AcornTable : Module {
         params[index].setValue(1.0);
       }
 
-      DEBUG("EXT R: %d C: %d", row, col);
-
       last_ext_row = row;
       last_ext_col = col;
 
-    }else{
-
     }
+    
 
     if(trig_gen.process(1 / args.sampleRate)){
       outputs[TRIG_OUTPUT].setVoltage(10.0f);
+      outputs[GATE_OUTPUT].setVoltage(0.0f);
     }else{
       outputs[TRIG_OUTPUT].setVoltage(0.0f);
+      outputs[GATE_OUTPUT].setVoltage(10.0f);
     }
 
 
@@ -355,17 +378,6 @@ struct WeldSplatter_AcornTable : Module {
 
 
   void process(const ProcessArgs& args) override {
-    
-
-    if((++debug_count % 44000) == 0){
-      debug_count = 0;
-      DEBUG("Row: %02d %02d %02d %02d %02d %02d %02d %02d %02d %02d %02d %02d",
-            taught_12_tone_row[0], taught_12_tone_row[1], taught_12_tone_row[2], taught_12_tone_row[3],
-            taught_12_tone_row[4], taught_12_tone_row[5], taught_12_tone_row[6], taught_12_tone_row[7],
-            taught_12_tone_row[8], taught_12_tone_row[9], taught_12_tone_row[10], taught_12_tone_row[11]);
-    }
-    
-
     
     if(params[TEACH_MODE_PARAM].getValue() > 0.5){
       process_teach_mode(args);
@@ -394,6 +406,19 @@ struct WeldSplatter_AcornTable : Module {
       outputs[TRIG_OUTPUT].setVoltage(10.0f);
     }else{
       outputs[TRIG_OUTPUT].setVoltage(0.0f);
+    }
+
+    for(int i = 0; i < 13; i++){
+      if(row_trig_gen[i].process(1 / args.sampleRate)){
+        outputs[ROW0_OUTPUT + i].setVoltage(10.0f);
+      }else{
+        outputs[ROW0_OUTPUT + i].setVoltage(0.0f);
+      }
+      if(col_trig_gen[i].process(1 / args.sampleRate)){
+        outputs[COL0_OUTPUT + i].setVoltage(10.0f);
+      }else{
+        outputs[COL0_OUTPUT + i].setVoltage(0.0f);
+      }
     }
 
     
@@ -451,42 +476,44 @@ struct WeldSplatter_AcornTableWidget : ModuleWidget {
       addChild(createWidget<ScrewSilver>(Vec(box.size.x - 2 * RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
 
-      auto w = createWidget<Label>(mm2px(Vec(10, 75)));
+      auto w = createWidget<Label>(mm2px(Vec(10, 60.0)));
       w->text = std::string{"- - - - - - - - - - - -"};
       w->color =  nvgRGB(0,0,0);
-      //w->setSize(mm2px(Vec(65, 10)));
       addChild(w);
 
       if(module != nullptr){
         module->teach_mode_indicators = w;
       }
 
-
-      
-      addInput(createInputCentered<PJ301MPort>(mm2px(Vec(30, 120)), module, WeldSplatter_AcornTable::TEACH_NOTE_INPUT));
-      addInput(createInputCentered<PJ301MPort>(mm2px(Vec(40, 120)), module, WeldSplatter_AcornTable::TEACH_TRIGGER_INPUT));
-
-      addInput(createInputCentered<PJ301MPort>(mm2px(Vec(50, 120)), module, WeldSplatter_AcornTable::ROW_INPUT));
-      addInput(createInputCentered<PJ301MPort>(mm2px(Vec(60, 120)), module, WeldSplatter_AcornTable::COL_INPUT));
-
       for(int i = 0; i < 12; i++){
-        addChild(createLightCentered<MediumLight<RedLight>>(mm2px(Vec(10 + i*5.0, 70)), module, i));
+        addChild(createLightCentered<MediumLight<RedLight>>(mm2px(Vec(10 + i*5.0, 55)), module, i));
       }
-      
-      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(40, 50 )), module, WeldSplatter_AcornTable::NOTE_OUTPUT));
-      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(50, 50 )), module, WeldSplatter_AcornTable::TRIG_OUTPUT));
-      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(60, 50 )), module, WeldSplatter_AcornTable::GATE_OUTPUT));
 
-      addParam(createParam<ToggleButton>(mm2px(Vec(30.0, 15.0)), module, WeldSplatter_AcornTable::TEACH_MODE_PARAM));
-      addParam(createParam<ToggleButton>(mm2px(Vec(40.0, 15.0)), module, WeldSplatter_AcornTable::ALLOW_REPITITION_PARAM));
-      addParam(createParam<ToggleButton>(mm2px(Vec(60.0, 15.0)), module, WeldSplatter_AcornTable::USE_EXT_PARAM));
-      addParam(createParam<ToggleButton>(mm2px(Vec(50.0, 15.0)), module, WeldSplatter_AcornTable::SINGLE_OCTAVE_PARAM)); 
       
+      addInput(createInputCentered<PJ301MPort>(mm2px(Vec(11, 116)), module, WeldSplatter_AcornTable::TEACH_NOTE_INPUT));
+      addInput(createInputCentered<PJ301MPort>(mm2px(Vec(22, 116)), module, WeldSplatter_AcornTable::TEACH_TRIGGER_INPUT));
+
+      addInput(createInputCentered<PJ301MPort>(mm2px(Vec(36, 116)), module, WeldSplatter_AcornTable::ROW_INPUT));
+      addInput(createInputCentered<PJ301MPort>(mm2px(Vec(47, 116)), module, WeldSplatter_AcornTable::COL_INPUT));
+
       
-      Vec firstButton(75.0, 5.0);
-      Vec col_offset(10.0, 0);
-      Vec row_offset(0.0, 10.0);
-            
+      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(11, 89 )), module, WeldSplatter_AcornTable::NOTE_OUTPUT));
+      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(22, 89 )), module, WeldSplatter_AcornTable::TRIG_OUTPUT));
+      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(33, 89 )), module, WeldSplatter_AcornTable::GATE_OUTPUT));
+
+      addParam(createParam<ToggleButton>(mm2px(Vec(7.0,  35.0)), module, WeldSplatter_AcornTable::TEACH_MODE_PARAM));
+      addParam(createParam<ToggleButton>(mm2px(Vec(22.0, 35.0)), module, WeldSplatter_AcornTable::ALLOW_REPITITION_PARAM));
+      addParam(createParam<ToggleButton>(mm2px(Vec(37.0, 35.0)), module, WeldSplatter_AcornTable::SINGLE_OCTAVE_PARAM)); 
+      addParam(createParam<ToggleButton>(mm2px(Vec(52.0, 35.0)), module, WeldSplatter_AcornTable::USE_EXT_PARAM));
+      
+      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(61,116)), module, WeldSplatter_AcornTable::ROW_ANY_OUTPUT));
+      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(72,116)), module, WeldSplatter_AcornTable::COL_ANY_OUTPUT));
+      
+      Vec firstButton(85.0, 5.0);
+      Vec col_offset(9.0, 0);
+      Vec row_offset(0.0, 9.0);
+
+
       for(int n = 0; n < 12; n++){
 	for(int m = 0; m < 12; m++) {
 	  Vec row = row_offset.mult(n);
@@ -497,7 +524,26 @@ struct WeldSplatter_AcornTableWidget : ModuleWidget {
 	  addParam(createParam<SmallButton>(mm2px(pos), module, index)); 
 	}
       }
-      
+
+      auto align_outputs = Vec{4.5+4.5/2,4.5};
+      for(int i = 0; i < 12; i++){
+        Vec col = col_offset.mult(12);
+        Vec row = row_offset.mult(i);
+        Vec pos = firstButton.plus(row.plus(col));
+        pos = pos.plus(align_outputs);
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(pos), module, WeldSplatter_AcornTable::ROW0_OUTPUT + i));
+
+      }
+
+      align_outputs = Vec{4.5, 4.5+4.5/2};
+      for(int i = 0; i < 12; i++){
+        Vec col = col_offset.mult(i);
+        Vec row = row_offset.mult(12);
+        Vec pos = firstButton.plus(row.plus(col));
+        pos = pos.plus(align_outputs);
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(pos), module, WeldSplatter_AcornTable::COL0_OUTPUT + i));
+      }
+
     } // Closes constructor
 
 
