@@ -26,8 +26,8 @@ struct WeldSplatter_AcornTable : Module {
   enum OutputIds
     {
      NOTE_OUTPUT,
-     TRIG_OUTPUT,
      GATE_OUTPUT,
+     TRIG_OUTPUT,
      COL0_OUTPUT,
      COL11_OUTPUT = COL0_OUTPUT + 11,
      COL_ANY_OUTPUT,
@@ -86,9 +86,9 @@ struct WeldSplatter_AcornTable : Module {
     
 
     for(int i = 0; i < 12; i++){
-      for(int j = 0; i < 12; i++){
-	int index = i * 12 + j;
-	configParam(index, 0.0, 1.0, 0.0);
+      for(int j = 0; j < 12; j++){
+	      int index = i * 12 + j;
+	      configParam(index, 0.0, 1.0, 0.0);
       }
     }
     configParam(TEACH_MODE_PARAM, 0.0, 1.0, 0.0, "Teach Mode");
@@ -498,8 +498,8 @@ struct WeldSplatter_AcornTableWidget : ModuleWidget {
 
       
       addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(11, 89 )), module, WeldSplatter_AcornTable::NOTE_OUTPUT));
-      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(22, 89 )), module, WeldSplatter_AcornTable::TRIG_OUTPUT));
-      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(33, 89 )), module, WeldSplatter_AcornTable::GATE_OUTPUT));
+      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(22, 89 )), module, WeldSplatter_AcornTable::GATE_OUTPUT));
+      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(33, 89 )), module, WeldSplatter_AcornTable::TRIG_OUTPUT));
 
       addParam(createParam<ToggleButton>(mm2px(Vec(7.0,  35.0)), module, WeldSplatter_AcornTable::TEACH_MODE_PARAM));
       addParam(createParam<ToggleButton>(mm2px(Vec(22.0, 35.0)), module, WeldSplatter_AcornTable::ALLOW_REPITITION_PARAM));
