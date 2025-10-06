@@ -137,6 +137,7 @@ struct WeldSplatter_AcornTable : Module {
   int taught_12_tone_row[12];
   int teach_index = 0;
   bool taught_notes = false;
+  bool wait_for_teach_gate_release = false;
 
   int last_i_cap = -1;
   int last_j_cap = -1;
@@ -176,6 +177,7 @@ struct WeldSplatter_AcornTable : Module {
       teach_mode_indicators->text = std::string{"- - - - - - - - - - - -"};
 
       teach_first_note = true;
+      wait_for_teach_gate_release = false;
     }
 
     
@@ -230,6 +232,7 @@ struct WeldSplatter_AcornTable : Module {
         if(teach_index >= 11){
           // We've taught all the notes
           params[TEACH_MODE_PARAM].setValue(0.0);
+          wait_for_teach_gate_release = true;
         }
 
         // Now update the note indicators
@@ -245,7 +248,6 @@ struct WeldSplatter_AcornTable : Module {
 
         if(teach_mode_indicators != nullptr){
           teach_mode_indicators->text = display;
-
         }
 
         teach_index = (teach_index + 1) % 12;
@@ -256,7 +258,7 @@ struct WeldSplatter_AcornTable : Module {
     // This will let the user hear the 12-tone row as they teach it.
     // (Give users feedback and all that...)
     outputs[NOTE_OUTPUT].setVoltage(inputs[TEACH_NOTE_INPUT].getVoltage());
-    if((note_input__number >= 0) && teach_gate_mask ) {
+    if(teach_gate_mask ) {
       outputs[GATE_OUTPUT].setVoltage(inputs[TEACH_TRIGGER_INPUT].getVoltage());
     }else{
       outputs[GATE_OUTPUT].setVoltage(0.0);
@@ -378,10 +380,18 @@ struct WeldSplatter_AcornTable : Module {
 
 
   void process(const ProcessArgs& args) override {
-    
     if(params[TEACH_MODE_PARAM].getValue() > 0.5){
       process_teach_mode(args);
-    }  else if(taught_notes) {
+    }else if (wait_for_teach_gate_release) {
+      // Once we leave teach mode, we need to keep processing the input gate, until it goes low
+      // This is so that the user can hear the last note, and that it won't latch the gate signal
+      // high.  (ie, play a note until the user presses one of the pad buttons)
+      outputs[GATE_OUTPUT].setVoltage(inputs[TEACH_TRIGGER_INPUT].getVoltage());
+      if (inputs[TEACH_TRIGGER_INPUT].getVoltage() < 0.5) {
+        wait_for_teach_gate_release = false;
+      }
+
+    }else if(taught_notes) {
       // This is a trigger when leaving teaching mode to recompute the 12-tone matrix
       taught_notes = false;
       generate_matrix();
