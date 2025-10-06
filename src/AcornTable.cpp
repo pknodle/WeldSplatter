@@ -26,8 +26,8 @@ struct WeldSplatter_AcornTable : Module {
   enum OutputIds
     {
      NOTE_OUTPUT,
-     TRIG_OUTPUT,
      GATE_OUTPUT,
+     TRIG_OUTPUT,
      COL0_OUTPUT,
      COL11_OUTPUT = COL0_OUTPUT + 11,
      COL_ANY_OUTPUT,
@@ -86,9 +86,9 @@ struct WeldSplatter_AcornTable : Module {
     
 
     for(int i = 0; i < 12; i++){
-      for(int j = 0; i < 12; i++){
-	int index = i * 12 + j;
-	configParam(index, 0.0, 1.0, 0.0);
+      for(int j = 0; j < 12; j++){
+	      int index = i * 12 + j;
+	      configParam(index, 0.0, 1.0, 0.0);
       }
     }
     configParam(TEACH_MODE_PARAM, 0.0, 1.0, 0.0, "Teach Mode");
@@ -137,17 +137,26 @@ struct WeldSplatter_AcornTable : Module {
   int taught_12_tone_row[12];
   int teach_index = 0;
   bool taught_notes = false;
+  bool wait_for_teach_gate_release = false;
 
   int last_i_cap = -1;
   int last_j_cap = -1;
 
+  // Keep track of the rows and column in external input mode.
+  // This allows the module to generate a trigger when the external signal
+  // moves to a new row or column.
+  //
+  // The general idea is that you can use a sample and hold module to sample the volts/octave
+  //  output on the new row/column.
   int last_ext_row = -1;
   int last_ext_col = -1;
-  
-  
+
   dsp::PulseGenerator trig_gen;
   dsp::SchmittTrigger teach_trigger;
 
+  // This should be 13 here.  There are 12 outputs for each row and col.
+  // There is an output for any row that uses row_trig_gen[13], and an output for
+  // any column that uses col_trig_gen[13].
   dsp::PulseGenerator row_trig_gen[13];
   dsp::PulseGenerator col_trig_gen[13];
   
@@ -176,9 +185,9 @@ struct WeldSplatter_AcornTable : Module {
       teach_mode_indicators->text = std::string{"- - - - - - - - - - - -"};
 
       teach_first_note = true;
+      wait_for_teach_gate_release = false;
     }
 
-    
     float note_input__volts = inputs[TEACH_NOTE_INPUT].getVoltage();
     int note_input__number = -1;
     
@@ -215,7 +224,7 @@ struct WeldSplatter_AcornTable : Module {
     
       if( (note_input__number >= 0) && (allow_repitition || !note_in_row)){
         taught_12_tone_row[teach_index] = note_input__number;
-
+        DEBUG("Teach Gate Event");
         teach_gate_mask = true;
         trig_gen.trigger(1e-3f);
         // Move the light to the next note in the row
@@ -230,6 +239,7 @@ struct WeldSplatter_AcornTable : Module {
         if(teach_index >= 11){
           // We've taught all the notes
           params[TEACH_MODE_PARAM].setValue(0.0);
+          wait_for_teach_gate_release = true;
         }
 
         // Now update the note indicators
@@ -245,7 +255,6 @@ struct WeldSplatter_AcornTable : Module {
 
         if(teach_mode_indicators != nullptr){
           teach_mode_indicators->text = display;
-
         }
 
         teach_index = (teach_index + 1) % 12;
@@ -256,7 +265,7 @@ struct WeldSplatter_AcornTable : Module {
     // This will let the user hear the 12-tone row as they teach it.
     // (Give users feedback and all that...)
     outputs[NOTE_OUTPUT].setVoltage(inputs[TEACH_NOTE_INPUT].getVoltage());
-    if((note_input__number >= 0) && teach_gate_mask ) {
+    if(teach_gate_mask ) {
       outputs[GATE_OUTPUT].setVoltage(inputs[TEACH_TRIGGER_INPUT].getVoltage());
     }else{
       outputs[GATE_OUTPUT].setVoltage(0.0);
@@ -274,11 +283,11 @@ struct WeldSplatter_AcornTable : Module {
     int index = 0;
     for(i = 0; i < 12; i++){
       for(j = 0; j < 12; j++){
-	index = i * 12 + j;
-	if(params[index].getValue() > 0.5){
+        index = i * 12 + j;
+        if(params[index].getValue() > 0.5){
           i_cap = i;
           j_cap = j;
-	}
+        }
       }
     }
 
@@ -321,7 +330,7 @@ struct WeldSplatter_AcornTable : Module {
       DEBUG("Out of Range: (%d %d)", row, col);
       return;
     }
-    
+
 
     if(row != last_ext_row){
       // We moved to a new row
@@ -378,10 +387,18 @@ struct WeldSplatter_AcornTable : Module {
 
 
   void process(const ProcessArgs& args) override {
-    
     if(params[TEACH_MODE_PARAM].getValue() > 0.5){
       process_teach_mode(args);
-    }  else if(taught_notes) {
+    }else if (wait_for_teach_gate_release) {
+      // Once we leave teach mode, we need to keep processing the input gate, until it goes low
+      // This is so that the user can hear the last note, and that it won't latch the gate signal
+      // high.  (ie, play a note until the user presses one of the pad buttons)
+      outputs[GATE_OUTPUT].setVoltage(inputs[TEACH_TRIGGER_INPUT].getVoltage());
+      if (inputs[TEACH_TRIGGER_INPUT].getVoltage() < 0.5) {
+        wait_for_teach_gate_release = false;
+      }
+
+    }else if(taught_notes) {
       // This is a trigger when leaving teaching mode to recompute the 12-tone matrix
       taught_notes = false;
       generate_matrix();
@@ -498,8 +515,8 @@ struct WeldSplatter_AcornTableWidget : ModuleWidget {
 
       
       addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(11, 89 )), module, WeldSplatter_AcornTable::NOTE_OUTPUT));
-      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(22, 89 )), module, WeldSplatter_AcornTable::TRIG_OUTPUT));
-      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(33, 89 )), module, WeldSplatter_AcornTable::GATE_OUTPUT));
+      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(22, 89 )), module, WeldSplatter_AcornTable::GATE_OUTPUT));
+      addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(33, 89 )), module, WeldSplatter_AcornTable::TRIG_OUTPUT));
 
       addParam(createParam<ToggleButton>(mm2px(Vec(7.0,  35.0)), module, WeldSplatter_AcornTable::TEACH_MODE_PARAM));
       addParam(createParam<ToggleButton>(mm2px(Vec(22.0, 35.0)), module, WeldSplatter_AcornTable::ALLOW_REPITITION_PARAM));
@@ -515,14 +532,14 @@ struct WeldSplatter_AcornTableWidget : ModuleWidget {
 
 
       for(int n = 0; n < 12; n++){
-	for(int m = 0; m < 12; m++) {
-	  Vec row = row_offset.mult(n);
-	  Vec col = col_offset.mult(m);
-	  Vec pos = firstButton.plus(row.plus(col));
+        for(int m = 0; m < 12; m++) {
+          Vec row = row_offset.mult(n);
+          Vec col = col_offset.mult(m);
+          Vec pos = firstButton.plus(row.plus(col));
 	  
-	  int index = n * 12 + m;
-	  addParam(createParam<SmallButton>(mm2px(pos), module, index)); 
-	}
+          int index = n * 12 + m;
+          addParam(createParam<SmallButton>(mm2px(pos), module, index));
+        }
       }
 
       auto align_outputs = Vec{4.5+4.5/2,4.5};
