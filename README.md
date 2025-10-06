@@ -2,9 +2,12 @@
 A VCV Rack plugin focusing on 12-tone music.  And, you know,
 bleepy-bloopy stuff...
 
+![An image of a VCVRack module with a array of buttons, control inputs, and outputs](./documentation/Example_Patch.png)
+
 See: [this video](https://youtu.be/tLkYu2iNsRs?si=sa8KAtsk2MNGBMT4) and [this](https://unitus.org/FULL/12tone.pdf) 
 for background. 
 
+[Here is a video of the module in action](https://vimeo.com/466801088) 
 
 ## Usage
 
