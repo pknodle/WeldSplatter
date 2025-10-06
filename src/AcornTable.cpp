@@ -142,13 +142,21 @@ struct WeldSplatter_AcornTable : Module {
   int last_i_cap = -1;
   int last_j_cap = -1;
 
+  // Keep track of the rows and column in external input mode.
+  // This allows the module to generate a trigger when the external signal
+  // moves to a new row or column.
+  //
+  // The general idea is that you can use a sample and hold module to sample the volts/octave
+  //  output on the new row/column.
   int last_ext_row = -1;
   int last_ext_col = -1;
-  
-  
+
   dsp::PulseGenerator trig_gen;
   dsp::SchmittTrigger teach_trigger;
 
+  // This should be 13 here.  There are 12 outputs for each row and col.
+  // There is an output for any row that uses row_trig_gen[13], and an output for
+  // any column that uses col_trig_gen[13].
   dsp::PulseGenerator row_trig_gen[13];
   dsp::PulseGenerator col_trig_gen[13];
   
@@ -180,7 +188,6 @@ struct WeldSplatter_AcornTable : Module {
       wait_for_teach_gate_release = false;
     }
 
-    
     float note_input__volts = inputs[TEACH_NOTE_INPUT].getVoltage();
     int note_input__number = -1;
     
@@ -217,7 +224,7 @@ struct WeldSplatter_AcornTable : Module {
     
       if( (note_input__number >= 0) && (allow_repitition || !note_in_row)){
         taught_12_tone_row[teach_index] = note_input__number;
-
+        DEBUG("Teach Gate Event");
         teach_gate_mask = true;
         trig_gen.trigger(1e-3f);
         // Move the light to the next note in the row
@@ -276,11 +283,11 @@ struct WeldSplatter_AcornTable : Module {
     int index = 0;
     for(i = 0; i < 12; i++){
       for(j = 0; j < 12; j++){
-	index = i * 12 + j;
-	if(params[index].getValue() > 0.5){
+        index = i * 12 + j;
+        if(params[index].getValue() > 0.5){
           i_cap = i;
           j_cap = j;
-	}
+        }
       }
     }
 
@@ -323,7 +330,7 @@ struct WeldSplatter_AcornTable : Module {
       DEBUG("Out of Range: (%d %d)", row, col);
       return;
     }
-    
+
 
     if(row != last_ext_row){
       // We moved to a new row
@@ -525,14 +532,14 @@ struct WeldSplatter_AcornTableWidget : ModuleWidget {
 
 
       for(int n = 0; n < 12; n++){
-	for(int m = 0; m < 12; m++) {
-	  Vec row = row_offset.mult(n);
-	  Vec col = col_offset.mult(m);
-	  Vec pos = firstButton.plus(row.plus(col));
+        for(int m = 0; m < 12; m++) {
+          Vec row = row_offset.mult(n);
+          Vec col = col_offset.mult(m);
+          Vec pos = firstButton.plus(row.plus(col));
 	  
-	  int index = n * 12 + m;
-	  addParam(createParam<SmallButton>(mm2px(pos), module, index)); 
-	}
+          int index = n * 12 + m;
+          addParam(createParam<SmallButton>(mm2px(pos), module, index));
+        }
       }
 
       auto align_outputs = Vec{4.5+4.5/2,4.5};
