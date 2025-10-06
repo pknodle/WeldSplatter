@@ -10,10 +10,10 @@ struct WeldSplatter_AcornTable : Module {
 		 // And recall that they are zero indexed
 		 TEACH_MODE_PARAM = 144,
 		 TEACH_NOTE_PARAM,
-                 ALLOW_REPITITION_PARAM,
-                 USE_EXT_PARAM,
-                 SINGLE_OCTAVE_PARAM,
-                 NUM_PARAMS
+     ALLOW_REPITITION_PARAM,
+     USE_EXT_PARAM,
+     SINGLE_OCTAVE_PARAM,
+     NUM_PARAMS
   };
   enum InputIds
     {
@@ -83,11 +83,10 @@ struct WeldSplatter_AcornTable : Module {
   
   WeldSplatter_AcornTable() {
     config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
-    
 
     for(int i = 0; i < 12; i++){
       for(int j = 0; j < 12; j++){
-	      int index = i * 12 + j;
+        int index = i * 12 + j;
 	      configParam(index, 0.0, 1.0, 0.0);
       }
     }
@@ -141,6 +140,9 @@ struct WeldSplatter_AcornTable : Module {
 
   int last_i_cap = -1;
   int last_j_cap = -1;
+
+  // Keep track of external mode so we can turn off the outputs when leaving external mode
+  bool track_ext_mode = false;
 
   // Keep track of the rows and column in external input mode.
   // This allows the module to generate a trigger when the external signal
@@ -411,8 +413,13 @@ struct WeldSplatter_AcornTable : Module {
     }else{
       // Playback mode
       if(params[USE_EXT_PARAM].getValue() < 0.5){
+        if (track_ext_mode) {
+          reset_pad();
+          track_ext_mode = false;
+        }
         process_pad_mode(args);
       }else{
+        track_ext_mode = true;
         process_ext_mode(args);
       }
     }
@@ -441,6 +448,14 @@ struct WeldSplatter_AcornTable : Module {
     
   }
 
+
+  void reset_pad() {
+    outputs[TRIG_OUTPUT].setVoltage(0.0f);
+    outputs[GATE_OUTPUT].setVoltage(0.0f);
+    for (int i = 0; i < 12 * 12; i++) {
+      getParam(i).setValue(0.0f);
+    }
+  }
 
   json_t* dataToJson () override{
     auto taught_row_json = json_array();
